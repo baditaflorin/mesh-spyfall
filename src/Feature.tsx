@@ -3,6 +3,7 @@ import {
   combineSalts,
   commit,
   randomSalt,
+  usePerPeerValue,
   verifyReveal,
   type MeshConfig,
   type YRoom,
@@ -56,77 +57,73 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
   const [revealedLocation, setRevealedLocation] = useState<string | null>(null);
   const saltRef = useRef<string>("");
 
+  const playersMap = usePerPeerValue<Player>(room, "players", { id: "", name: "" });
+  const commitsMap = usePerPeerValue<Commitment>(room, "commits", { hash: "" });
+  const revealsMap = usePerPeerValue<Reveal>(room, "reveals", { salt: "" });
+
   useEffect(() => {
     if (name) localStorage.setItem(NAME_KEY(config.storagePrefix), name);
   }, [name, config.storagePrefix]);
 
   useEffect(() => {
-    const yPlayers = room.doc.getMap<Player>("players");
-    const yCommits = room.doc.getMap<Commitment>("commits");
-    const yReveals = room.doc.getMap<Reveal>("reveals");
     const yPhase = room.doc.getMap<{ phase: Phase }>("phase");
     const onChange = () => rerender((n) => n + 1);
-    yPlayers.observe(onChange);
-    yCommits.observe(onChange);
-    yReveals.observe(onChange);
     yPhase.observe(onChange);
     return () => {
-      yPlayers.unobserve(onChange);
-      yCommits.unobserve(onChange);
-      yReveals.unobserve(onChange);
       yPhase.unobserve(onChange);
     };
   }, [room]);
 
   useEffect(() => {
     const myName = name.trim() || `peer-${room.peerId.slice(0, 4)}`;
-    room.doc.getMap<Player>("players").set(room.peerId, { id: room.peerId, name: myName });
+    playersMap.setMy({ id: room.peerId, name: myName });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room, name]);
 
-  const yPlayers = room.doc.getMap<Player>("players");
-  const yCommits = room.doc.getMap<Commitment>("commits");
-  const yReveals = room.doc.getMap<Reveal>("reveals");
   const yPhase = room.doc.getMap<{ phase: Phase }>("phase");
   const phase: Phase = yPhase.get("current")?.phase ?? "lobby";
-  const players: Player[] = [];
-  yPlayers.forEach((p) => players.push(p));
-  players.sort((a, b) => a.id.localeCompare(b.id));
+  const players: Player[] = playersMap.entries
+    .map(([, p]) => p)
+    .filter((p) => p && p.id)
+    .sort((a, b) => a.id.localeCompare(b.id));
 
   // On entering commit phase, generate salt + commit
   useEffect(() => {
     if (phase !== "commit") return;
-    if (yCommits.has(room.peerId)) return;
+    if (commitsMap.valueOf(room.peerId) !== undefined) return;
     const salt = randomSalt();
     saltRef.current = salt;
     void commit("", salt).then(({ hash }) => {
-      yCommits.set(room.peerId, { hash });
+      commitsMap.setMy({ hash });
     });
-  }, [phase, room.peerId, yCommits]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, room.peerId]);
 
   // On entering reveal phase, publish salt
   useEffect(() => {
     if (phase !== "reveal") return;
-    if (yReveals.has(room.peerId)) return;
+    if (revealsMap.valueOf(room.peerId) !== undefined) return;
     if (!saltRef.current) return;
-    yReveals.set(room.peerId, { salt: saltRef.current });
-  }, [phase, room.peerId, yReveals]);
+    revealsMap.setMy({ salt: saltRef.current });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase, room.peerId]);
 
   // Once everyone has revealed, derive role
   useEffect(() => {
     if (phase !== "reveal" && phase !== "play") return;
     if (players.length === 0) return;
-    if (!players.every((p) => yReveals.has(p.id))) return;
-    if (!players.every((p) => yCommits.has(p.id))) return;
+    if (!players.every((p) => revealsMap.valueOf(p.id) !== undefined)) return;
+    if (!players.every((p) => commitsMap.valueOf(p.id) !== undefined)) return;
     void (async () => {
       for (const p of players) {
-        const c = yCommits.get(p.id)?.hash ?? "";
-        const r = yReveals.get(p.id)?.salt ?? "";
+        const c = commitsMap.valueOf(p.id)?.hash ?? "";
+        const r = revealsMap.valueOf(p.id)?.salt ?? "";
         if (!(await verifyReveal(c, { salt: r, payload: "" }))) {
           console.error(`[spyfall] BAD COMMIT from ${p.id}`);
           return;
         }
       }
-      const salts = players.map((p) => yReveals.get(p.id)!.salt);
+      const salts = players.map((p) => revealsMap.valueOf(p.id)!.salt);
       const seed = combineSalts(salts);
       const locIdx = Math.floor(seed * LOCATIONS.length) % LOCATIONS.length;
       const ids = [...players].map((p) => p.id).sort();
@@ -138,14 +135,15 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
       setRevealedLocation(location);
       if (phase === "reveal") yPhase.set("current", { phase: "play" });
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, players.length, room.peerId]);
 
   const setPhase = (p: Phase) => yPhase.set("current", { phase: p });
 
   const restart = () => {
     room.doc.transact(() => {
-      yCommits.clear();
-      yReveals.clear();
+      room.doc.getMap<Commitment>("commits").clear();
+      room.doc.getMap<Reveal>("reveals").clear();
       yPhase.set("current", { phase: "lobby" });
     });
     setMyRole(null);
@@ -153,8 +151,10 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
     saltRef.current = "";
   };
 
-  const allCommitted = players.length >= 3 && players.every((p) => yCommits.has(p.id));
-  const allRevealed = players.length >= 3 && players.every((p) => yReveals.has(p.id));
+  const allCommitted =
+    players.length >= 3 && players.every((p) => commitsMap.valueOf(p.id) !== undefined);
+  const allRevealed =
+    players.length >= 3 && players.every((p) => revealsMap.valueOf(p.id) !== undefined);
 
   return (
     <div className={`spy-screen spy-phase-${phase}`}>
@@ -196,7 +196,7 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
         <div className="spy-card">
           <p>everyone is committing a secret seed…</p>
           <p className="spy-help">
-            committed: {Array.from(yCommits.keys()).length}/{players.length}
+            committed: {commitsMap.size}/{players.length}
           </p>
           <button type="button" disabled={!allCommitted} onClick={() => setPhase("reveal")}>
             all committed → reveal
@@ -208,7 +208,7 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
         <div className="spy-card">
           <p>revealing…</p>
           <p className="spy-help">
-            revealed: {Array.from(yReveals.keys()).length}/{players.length}
+            revealed: {revealsMap.size}/{players.length}
             {allRevealed && myRole ? " · roles dealt" : ""}
           </p>
         </div>
