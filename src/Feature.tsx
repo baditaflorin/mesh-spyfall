@@ -108,6 +108,19 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase, room.peerId]);
 
+  // Stable signature of every peer's commit hash + revealed salt. When a peer
+  // reveals over the mesh, `usePerPeerValue` re-renders but `phase`/
+  // `players.length` are unchanged — so without this in the dep array the
+  // role-derivation effect below never re-ran and the game hung on "reveal".
+  const revealSig = [...revealsMap.entries]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, r]) => `${id}:${r.salt}`)
+    .join("|");
+  const commitSig = [...commitsMap.entries]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([id, c]) => `${id}:${c.hash}`)
+    .join("|");
+
   // Once everyone has revealed, derive role
   useEffect(() => {
     if (phase !== "reveal" && phase !== "play") return;
@@ -127,7 +140,13 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
       const seed = combineSalts(salts);
       const locIdx = Math.floor(seed * LOCATIONS.length) % LOCATIONS.length;
       const ids = [...players].map((p) => p.id).sort();
-      const spySeed = combineSalts([...salts].reverse());
+      // Spy index needs entropy INDEPENDENT of the location seed. `combineSalts`
+      // XORs the salts and XOR is commutative, so reversing the array yields
+      // the IDENTICAL value — the spy was perfectly correlated with the
+      // location. Derive the spy seed from a salt that depends on order, so the
+      // spy and location are picked independently yet deterministically on
+      // every peer.
+      const spySeed = combineSalts(salts.map((s, i) => `${i}${s}`));
       const spyIdx = Math.floor(spySeed * ids.length) % ids.length;
       const spyId = ids[spyIdx]!;
       const location = LOCATIONS[locIdx]!;
@@ -136,7 +155,7 @@ function Body({ room, config }: { room: YRoom; config: MeshConfig }) {
       if (phase === "reveal") yPhase.set("current", { phase: "play" });
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [phase, players.length, room.peerId]);
+  }, [phase, players.length, room.peerId, revealSig, commitSig]);
 
   const setPhase = (p: Phase) => yPhase.set("current", { phase: p });
 

@@ -1,6 +1,6 @@
 {
   "name": "mesh-spyfall",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Secret-role party game — one phone gets 'spy' via commit-reveal, everyone else gets the location",
   "type": "module",
   "private": false,
@@ -37,6 +37,7 @@
     "yjs": "^13.6.27"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "@playwright/test": "^1.50.0",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.1.0",

@@ -1,7 +1,7 @@
 # mesh-spyfall
 
 [![pages](https://img.shields.io/badge/live-baditaflorin.github.io%2Fmesh-spyfall-6e44ff)](https://baditaflorin.github.io/mesh-spyfall/)
-[![version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/baditaflorin/mesh-spyfall/blob/main/package.json)
+[![version](https://img.shields.io/badge/version-0.1.1-blue)](https://github.com/baditaflorin/mesh-spyfall/blob/main/package.json)
 [![license](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 
 > Secret-role party game — one phone gets 'spy' via commit-reveal, everyone else gets the location
